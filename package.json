@@ -1,17 +1,44 @@
 {
   "name": "cdk-github-runner-switch",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "AWS CDK construct: GitHub Actions runners that switch from GitHub-hosted free minutes to disposable EC2 Spot (Graviton) machines when the monthly minutes run out — and back when the month resets.",
   "license": "Apache-2.0",
   "author": "uarch-solutions",
-  "repository": { "type": "git", "url": "git+https://github.com/uarch-solutions/cdk-github-runner-switch.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/uarch-solutions/cdk-github-runner-switch.git"
+  },
   "homepage": "https://github.com/uarch-solutions/cdk-github-runner-switch#readme",
-  "bugs": { "url": "https://github.com/uarch-solutions/cdk-github-runner-switch/issues" },
-  "keywords": ["aws-cdk", "cdk", "construct", "github-actions", "self-hosted-runner", "github-runner", "ec2-spot", "graviton", "arm64", "ci", "cost-optimization"],
+  "bugs": {
+    "url": "https://github.com/uarch-solutions/cdk-github-runner-switch/issues"
+  },
+  "keywords": [
+    "aws-cdk",
+    "cdk",
+    "construct",
+    "github-actions",
+    "self-hosted-runner",
+    "github-runner",
+    "ec2-spot",
+    "graviton",
+    "arm64",
+    "ci",
+    "cost-optimization"
+  ],
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
-  "files": ["lib", "lambda", "scripts", "README.md", "README.pt-BR.md", "LICENSE", "NOTICE"],
-  "engines": { "node": ">=20" },
+  "files": [
+    "lib",
+    "lambda",
+    "scripts",
+    "README.md",
+    "README.pt-BR.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "tsc",
     "test": "vitest run",

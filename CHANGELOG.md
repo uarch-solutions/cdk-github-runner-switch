@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1
+
+- Published from GitHub Actions with npm Trusted Publishing (OIDC) and provenance; no npm token is stored.
+
 ## 0.1.0
 
 - First release: `GitHubRunnerSwitch` construct. It switches between GitHub-hosted runners and EC2 Spot (arm64)

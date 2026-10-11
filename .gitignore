@@ -3,3 +3,4 @@ lib/
 cdk.out/
 *.tgz
 coverage/
+cdk-test/
