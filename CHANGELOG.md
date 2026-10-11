@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.0
+
+- `secret` option: reuse an existing Secrets Manager secret with the GitHub App credentials (e.g. when migrating an existing setup).
+
 ## 0.1.1
 
 - Published from GitHub Actions with npm Trusted Publishing (OIDC) and provenance; no npm token is stored.

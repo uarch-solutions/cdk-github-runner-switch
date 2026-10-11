@@ -102,6 +102,7 @@ To flip the switch by hand: `gh variable set RUNNER --body aws` (or `github`).
 | `nodeMajorVersion` | `24` | Node.js installed in the image. |
 | `cachedImages` | `[]` | Container images pulled into the AMI, for faster `services:`. |
 | `extraImageCommands` | `[]` | Extra setup, e.g. `npx -y playwright install-deps chromium`. |
+| `secret` | new secret | Reuse an existing secret with `webhookSecret`, `appId` and `privateKey` (e.g. when migrating). |
 | `imageSchedule` | monthly (day 1, 05:00 UTC) | EventBridge cron for the image rebuild. |
 | `reconcileInterval` / `usageCheckInterval` | 5 min / 30 min | |
 

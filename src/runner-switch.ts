@@ -54,6 +54,11 @@ export interface GitHubRunnerSwitchProps {
   readonly extraImageCommands?: string[];
   /** When the image is rebuilt (EventBridge cron, UTC). @default 'cron(0 5 1 * ? *)' — monthly, day 1 at 05:00 */
   readonly imageSchedule?: string;
+  /**
+   * Existing secret with `webhookSecret`, `appId` and `privateKey` (and `billingToken` for personal accounts), e.g. when
+   * migrating an existing setup. @default - a new secret with a generated `webhookSecret`
+   */
+  readonly secret?: secretsmanager.ISecret;
   /** @default Duration.minutes(5) */
   readonly reconcileInterval?: Duration;
   /** @default Duration.minutes(30) */
@@ -156,7 +161,7 @@ export class GitHubRunnerSwitch extends Construct {
     this.imagePipelineArn = pipeline.attrArn;
 
     // GitHub App credentials: the webhook secret is generated here; the setup script adds appId and privateKey.
-    const secret = new secretsmanager.Secret(this, 'AppSecret', {
+    const secret = props.secret ?? new secretsmanager.Secret(this, 'AppSecret', {
       description: `GitHub App of the runners for ${props.repository} (cdk-github-runner-switch)`,
       generateSecretString: {
         secretStringTemplate: JSON.stringify({ appId: '', privateKey: '' }),

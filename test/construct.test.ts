@@ -1,6 +1,7 @@
 import { App, Duration, Stack } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { describe, expect, it } from 'vitest';
 import { BillingScope, GitHubRunnerSwitch, runnerComponent } from '../src';
 
@@ -79,6 +80,18 @@ describe('GitHubRunnerSwitch', () => {
     custom.hasResourceProperties('AWS::EC2::LaunchTemplate', {
       LaunchTemplateData: Match.objectLike({ BlockDeviceMappings: [Match.objectLike({ Ebs: Match.objectLike({ VolumeSize: 60 }) })] }),
     });
+  });
+
+  it('can reuse an existing secret (no new secret is created)', () => {
+    const app = new App({ context: { 'aws:cdk:bundling-stacks': [] } });
+    const stack = new Stack(app, 'Ci', { env: { account: '111111111111', region: 'us-east-1' } });
+    const vpc = new ec2.Vpc(stack, 'Vpc', { natGateways: 0, subnetConfiguration: [{ name: 'public', subnetType: ec2.SubnetType.PUBLIC }] });
+    const existing = secretsmanager.Secret.fromSecretNameV2(stack, 'Existing', 'ci/github-app');
+    new GitHubRunnerSwitch(stack, 'Runners', { vpc, repository: 'acme/app', secret: existing });
+    const tpl = Template.fromStack(stack);
+    tpl.resourceCountIs('AWS::SecretsManager::Secret', 0);
+    const fn = Object.values(tpl.findResources('AWS::Lambda::Function'))[0] as any;
+    expect(JSON.stringify(fn.Properties.Environment.Variables.SECRET_ID)).toContain('secret:ci/github-app');
   });
 
   it('rejects a repository that is not owner/name', () => {
