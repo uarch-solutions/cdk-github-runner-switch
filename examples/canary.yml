@@ -1,0 +1,17 @@
+# Weekly liveness test of the AWS runners, regardless of the switch (costs no GitHub minutes).
+name: Runner canary
+on:
+  schedule: [{ cron: '0 9 * * 1' }]
+  workflow_dispatch:
+
+jobs:
+  canary:
+    runs-on: [self-hosted, linux, arm64, aws]
+    timeout-minutes: 15
+    steps:
+      - run: |
+          uname -m
+          node --version
+          aws --version
+          gh --version | head -1
+          docker run --rm hello-world

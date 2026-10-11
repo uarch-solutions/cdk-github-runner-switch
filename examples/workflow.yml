@@ -1,0 +1,21 @@
+# Example: every job picks the runner from the repository variable RUNNER (flipped by the construct).
+name: CI
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ${{ vars.RUNNER == 'aws' && fromJSON('["self-hosted","linux","arm64","aws"]') || 'ubuntu-24.04-arm' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - run: npm ci && npm test
+
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    # Deploys run on-demand: a Spot interruption in the middle of a deploy is not worth the savings.
+    runs-on: ${{ vars.RUNNER == 'aws' && fromJSON('["self-hosted","linux","arm64","aws-ondemand"]') || 'ubuntu-24.04-arm' }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo deploy
