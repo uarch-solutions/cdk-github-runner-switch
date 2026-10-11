@@ -2,7 +2,8 @@
 //
 // 1. Webhook `workflow_job` from the GitHub App → one disposable EC2 machine (Spot first) with a single-use (JIT)
 //    runner registration for the queued job.
-// 2. Every few minutes (`reconcile`) → queued jobs that have no machine (lost webhook, cap reached) get one.
+// 2. Every few minutes (`reconcile`) → queued jobs that have no machine (lost webhook, cap reached) get one, and
+//    machines left without a job (job cancelled, or taken by another machine) are terminated after a grace period.
 // 3. Every half hour (`check-usage`) → flips the repository variable (default `RUNNER`) between `github` and `aws`
 //    according to the GitHub Actions minutes used this month, and re-runs the runs that failed for lack of minutes.
 //
@@ -30,6 +31,7 @@ export function config(env = process.env) {
     billing: env.BILLING === 'user' ? 'user' : 'organization',
     runnerGroupId: Number(env.RUNNER_GROUP_ID || 1),
     maxJobMinutes: Number(env.MAX_JOB_MINUTES || 120),
+    idleGraceMinutes: Number(env.IDLE_GRACE_MINUTES || 5),
     switchId: env.SWITCH_ID || 'default',
     repository: env.REPOSITORY || '',
   };
@@ -91,6 +93,38 @@ export function missingRunners({ queued, active, busy }, c = config()) {
     if (need > 0) { out[label] = need; room -= need; }
   }
   return out;
+}
+
+/**
+ * Machines without a job. A JIT runner is not tied to the job that launched it: when that job is cancelled, or another
+ * idle runner takes it first, the machine would wait until `maxJobMinutes`. Per label, the machines whose runner is not
+ * busy (idle, still offline, or not registered) beyond the queued jobs are surplus; only those launched more than
+ * `idleGraceMinutes` ago are terminated (a young machine is still booting or about to take a job), oldest first.
+ * Also returns offline registrations of our labels with no machine behind them (left by terminated machines).
+ *
+ * `instances`: `{ id, label, launchTime, runnerName?, jobId? }`; `runners`: GitHub runners (`id`, `name`, `status`, `busy`, `labels`).
+ */
+export function surplusRunners({ queued, instances, runners }, c = config(), now = new Date()) {
+  const ours = (r) => (r.labels ?? []).some((l) => [c.label, c.onDemandLabel].includes(l.name ?? l));
+  const runnerOf = (i) => runners.find((r) => (i.runnerName ? r.name === i.runnerName : i.jobId && r.name.startsWith(`aws-${i.jobId}-`)));
+  const terminate = [];
+  for (const label of [c.onDemandLabel, c.label]) {
+    const free = instances
+      .filter((i) => i.label === label)
+      .map((i) => ({ ...i, runner: runnerOf(i) }))
+      .filter((i) => !i.runner?.busy)
+      .sort((a, b) => new Date(a.launchTime) - new Date(b.launchTime));
+    let extra = free.length - (queued[label] ?? 0);
+    for (const i of free) {
+      if (extra <= 0) break;
+      if (now - new Date(i.launchTime) < c.idleGraceMinutes * 60_000) continue;
+      terminate.push({ instanceId: i.id, runnerId: i.runner?.id ?? null });
+      extra--;
+    }
+  }
+  const matched = new Set(instances.map(runnerOf).filter(Boolean).map((r) => r.id));
+  const orphans = runners.filter((r) => ours(r) && r.status === 'offline' && !r.busy && !matched.has(r.id)).map((r) => r.id);
+  return { terminate, orphans };
 }
 
 /** Boot script: runs exactly one job (JIT) and shuts down — the launch template turns shutdown into terminate. */
@@ -160,20 +194,24 @@ async function ec2() {
   return { client: ec2Client, ...m };
 }
 
-async function activeByLabel(c) {
+async function instancesOf(c) {
   const { client, DescribeInstancesCommand } = await ec2();
   const r = await client.send(new DescribeInstancesCommand({
     Filters: [{ Name: 'tag:runner-switch', Values: [c.switchId] }, { Name: 'instance-state-name', Values: ['pending', 'running'] }],
   }));
-  const out = {};
-  for (const i of (r.Reservations ?? []).flatMap((x) => x.Instances ?? [])) {
-    const label = i.Tags?.find((t) => t.Key === 'runner-label')?.Value ?? c.label;
-    out[label] = (out[label] ?? 0) + 1;
-  }
-  return out;
+  return (r.Reservations ?? []).flatMap((x) => x.Instances ?? []).map((i) => {
+    const tag = (k) => i.Tags?.find((t) => t.Key === k)?.Value;
+    return { id: i.InstanceId, label: tag('runner-label') ?? c.label, launchTime: i.LaunchTime, runnerName: tag('runner-name'), jobId: tag('github-job') };
+  });
 }
 
-async function launch(c, jobId, onDemand, jit) {
+const countByLabel = (instances) => instances.reduce((out, i) => ({ ...out, [i.label]: (out[i.label] ?? 0) + 1 }), {});
+
+async function activeByLabel(c) {
+  return countByLabel(await instancesOf(c));
+}
+
+async function launch(c, jobId, onDemand, jit, runnerName) {
   const { SSMClient, GetParameterCommand } = await sdk.ssm();
   const ami = (await new SSMClient({}).send(new GetParameterCommand({ Name: process.env.AMI_PARAMETER }))).Parameter.Value;
   const { client, RunInstancesCommand } = await ec2();
@@ -191,7 +229,7 @@ async function launch(c, jobId, onDemand, jit) {
           ResourceType: 'instance',
           Tags: [
             { Key: 'Name', Value: `github-runner-${c.switchId}` }, { Key: 'runner-switch', Value: c.switchId }, { Key: 'github-job', Value: String(jobId) },
-            { Key: 'market', Value: p.spot ? 'spot' : 'on-demand' }, { Key: 'runner-label', Value: label },
+            { Key: 'market', Value: p.spot ? 'spot' : 'on-demand' }, { Key: 'runner-label', Value: label }, { Key: 'runner-name', Value: runnerName },
           ],
         }],
       }));
@@ -208,14 +246,15 @@ async function launch(c, jobId, onDemand, jit) {
 }
 
 async function launchFor(c, token, jobId, onDemand) {
+  const name = `aws-${jobId}-${Date.now().toString(36)}`;
   const jit = await gh(`/repos/${c.repository}/actions/runners/generate-jitconfig`, {
     token, method: 'POST',
     body: {
-      name: `aws-${jobId}-${Date.now().toString(36)}`, runner_group_id: c.runnerGroupId, work_folder: '_work',
+      name, runner_group_id: c.runnerGroupId, work_folder: '_work',
       labels: ['self-hosted', 'linux', 'arm64', onDemand ? c.onDemandLabel : c.label],
     },
   });
-  return launch(c, jobId, onDemand, jit.json.encoded_jit_config);
+  return launch(c, jobId, onDemand, jit.json.encoded_jit_config, name);
 }
 
 // ---------------------------------------------------------------- tasks
@@ -254,6 +293,25 @@ export async function reconcile(c = config()) {
     }
   }
   const runners = await gh(`/repos/${c.repository}/actions/runners?per_page=100`, { token });
+  const instances = await instancesOf(c);
+  const { terminate, orphans } = surplusRunners({ queued, instances, runners: runners.json?.runners ?? [] }, c);
+  const ended = new Set();
+  for (const t of terminate) {
+    // Remove the registration first: GitHub refuses it while the runner is busy, so a job taken meanwhile is safe.
+    if (t.runnerId) {
+      try {
+        await gh(`/repos/${c.repository}/actions/runners/${t.runnerId}`, { token, method: 'DELETE' });
+      } catch (e) {
+        console.log(JSON.stringify({ keep: t.instanceId, reason: e.message }));
+        continue;
+      }
+    }
+    const { client, TerminateInstancesCommand } = await ec2();
+    await client.send(new TerminateInstancesCommand({ InstanceIds: [t.instanceId] }));
+    ended.add(t.instanceId);
+  }
+  for (const id of orphans) await gh(`/repos/${c.repository}/actions/runners/${id}`, { token, method: 'DELETE' }).catch((e) => console.log(e.message));
+  if (ended.size || orphans.length) console.log(JSON.stringify({ surplus: { terminated: [...ended], orphans } }));
   const busy = {};
   for (const r of runners.json?.runners ?? []) {
     if (!r.busy) continue;
@@ -261,7 +319,7 @@ export async function reconcile(c = config()) {
     const l = names.includes(c.onDemandLabel) ? c.onDemandLabel : names.includes(c.label) ? c.label : null;
     if (l) busy[l] = (busy[l] ?? 0) + 1;
   }
-  const active = await activeByLabel(c);
+  const active = countByLabel(instances.filter((i) => !ended.has(i.id)));
   const missing = missingRunners({ queued, active, busy }, c);
   console.log(JSON.stringify({ reconcile: { queued, active, busy, missing } }));
   for (const [label, n] of Object.entries(missing)) {

@@ -44,11 +44,15 @@ describe('GitHubRunnerSwitch', () => {
     });
   });
 
-  it('least privilege: launch, tag and list instances, pass only the runner role; never terminate', () => {
+  it('least privilege: launch, tag and list instances, pass only the runner role; terminate only its own machines', () => {
     const policies = Object.values(t.findResources('AWS::IAM::Policy')) as any[];
-    const actions = policies.flatMap((p) => p.Properties.PolicyDocument.Statement.flatMap((s: any) => [].concat(s.Action)));
+    const statements = policies.flatMap((p) => p.Properties.PolicyDocument.Statement);
+    const actions = statements.flatMap((s: any) => [].concat(s.Action));
     expect(actions).toEqual(expect.arrayContaining(['ec2:RunInstances', 'ec2:CreateTags', 'ec2:DescribeInstances', 'iam:PassRole', 'ssm:GetParameter']));
-    expect(actions.some((a: string) => /^ec2:(TerminateInstances|\*)$|^\*$/.test(a))).toBe(false);
+    expect(actions.some((a: string) => /^ec2:\*$|^\*$/.test(a))).toBe(false);
+    const terminate = statements.filter((s: any) => [].concat(s.Action).includes('ec2:TerminateInstances' as never));
+    expect(terminate).toHaveLength(1);
+    expect(terminate[0].Condition).toEqual({ StringEquals: { 'aws:ResourceTag/runner-switch': expect.any(String) } });
   });
 
   it('secret with a generated webhook secret and empty App fields', () => {

@@ -42,10 +42,10 @@ flowchart LR
 |---|---|
 | Webhook (Lambda Function URL) | Checks the GitHub signature. Each queued job that asks for the AWS label gets one machine: Spot on every instance type × subnet first, then on-demand. |
 | Switch (every 30 min) | Reads the Actions minutes used this month and flips `RUNNER` to `aws` at the threshold (default 1,900 of 2,000). It flips back to `github` when the month resets. When it moves to AWS, it re-runs the runs that failed because the minutes ran out. |
-| Reconciliation (every 5 min) | Queued jobs without a machine get one. This covers a lost webhook and jobs that hit the machine cap. |
+| Reconciliation (every 5 min) | Queued jobs without a machine get one. This covers a lost webhook and jobs that hit the machine cap. A machine left without a job (its job was cancelled, or another runner took it) is terminated after 5 minutes. |
 | On-demand label | Jobs labeled `aws-ondemand` (for example, deploys) skip Spot, so an interruption never cuts a deploy in half. |
 | Runner image | Ubuntu 24.04 arm64 from Canonical with Docker, Node.js, Python, git, GitHub CLI, AWS CLI and the runner. EC2 Image Builder rebuilds it monthly. You can add cached container images and extra commands. |
-| Safety | Security group with no inbound rules, IMDSv2, encrypted disk, shutdown → terminate, a 2-hour guard against hung jobs. The function may only launch, tag and list instances. |
+| Safety | Security group with no inbound rules, IMDSv2, encrypted disk, shutdown → terminate, a 2-hour guard against hung jobs. The function may launch, tag and list instances, and terminate only the ones it launched (tag condition). |
 
 ## Quick start
 
@@ -98,6 +98,7 @@ To flip the switch by hand: `gh variable set RUNNER --body aws` (or `github`).
 | `maxInstances` | `6` | Machine cap. Jobs above it wait and are launched by the reconciliation. |
 | `switchVariable` | `RUNNER` | Repository variable that the construct flips. |
 | `maxJobDuration` | 2 hours | The machine shuts down after this, even if a job hangs. |
+| `idleGrace` | 5 min | A machine without a job older than this is terminated by the reconciliation. |
 | `rootVolumeSize` | `40` GiB | |
 | `nodeMajorVersion` | `24` | Node.js installed in the image. |
 | `cachedImages` | `[]` | Container images pulled into the AMI, for faster `services:`. |

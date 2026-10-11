@@ -1,6 +1,6 @@
 {
   "name": "cdk-github-runner-switch",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "AWS CDK construct: GitHub Actions runners that switch from GitHub-hosted free minutes to disposable EC2 Spot (Graviton) machines when the monthly minutes run out — and back when the month resets.",
   "license": "Apache-2.0",
   "author": "uarch-solutions",

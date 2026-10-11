@@ -44,6 +44,11 @@ export interface GitHubRunnerSwitchProps {
   readonly runnerGroupId?: number;
   /** Safety net: the machine shuts down after this long even if the job hangs. @default Duration.hours(2) */
   readonly maxJobDuration?: Duration;
+  /**
+   * A machine left without a job (its job was cancelled, or another runner took it) is terminated by the
+   * reconciliation once it is older than this. @default Duration.minutes(5)
+   */
+  readonly idleGrace?: Duration;
   /** Root disk in GiB. @default 40 */
   readonly rootVolumeSize?: number;
   /** Node.js major version installed in the image. @default 24 */
@@ -192,6 +197,7 @@ export class GitHubRunnerSwitch extends Construct {
         SWITCH_VARIABLE: props.switchVariable ?? 'RUNNER',
         RUNNER_GROUP_ID: String(props.runnerGroupId ?? 1),
         MAX_JOB_MINUTES: String((props.maxJobDuration ?? Duration.hours(2)).toMinutes()),
+        IDLE_GRACE_MINUTES: String((props.idleGrace ?? Duration.minutes(5)).toMinutes()),
         SWITCH_ID: name,
         AMI_PARAMETER: this.amiParameterName,
         LAUNCH_TEMPLATE_ID: template.launchTemplateId!,
@@ -205,6 +211,11 @@ export class GitHubRunnerSwitch extends Construct {
     fn.addToRolePolicy(new iam.PolicyStatement({ actions: ['ssm:GetParameter'], resources: [`arn:aws:ssm:${region}:${account}:parameter${this.amiParameterName}`] }));
     fn.addToRolePolicy(new iam.PolicyStatement({ actions: ['ec2:RunInstances', 'ec2:CreateTags', 'ec2:DescribeInstances'], resources: ['*'] }));
     fn.addToRolePolicy(new iam.PolicyStatement({ actions: ['iam:PassRole'], resources: [instanceRole.roleArn] }));
+    // Only its own machines (tagged at launch) can be terminated: the ones left without a job.
+    fn.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['ec2:TerminateInstances'], resources: [`arn:aws:ec2:${region}:${account}:instance/*`],
+      conditions: { StringEquals: { 'aws:ResourceTag/runner-switch': name } },
+    }));
     this.webhookUrl = fn.addFunctionUrl({ authType: lambda.FunctionUrlAuthType.NONE }).url;
 
     new events.Rule(this, 'UsageCheck', {

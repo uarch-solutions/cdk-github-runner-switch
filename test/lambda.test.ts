@@ -69,6 +69,30 @@ describe('control function rules', () => {
     expect(fn.missingRunners({ queued: {}, active: {}, busy: {} }, c)).toEqual({});
   });
 
+  it('machines left without a job are terminated after the grace period, oldest first; busy ones never', () => {
+    const now = new Date('2026-10-11T20:00:00Z');
+    const ago = (min: number) => new Date(now.getTime() - min * 60_000).toISOString();
+    const runner = (id: number, name: string, o: { busy?: boolean; status?: string } = {}) => ({ id, name, busy: !!o.busy, status: o.status ?? 'online', labels: [{ name: 'self-hosted' }, { name: 'aws' }] });
+    const instances = [
+      { id: 'i-old', label: 'aws', launchTime: ago(30), runnerName: 'aws-1-a' }, // idle for a long time
+      { id: 'i-busy', label: 'aws', launchTime: ago(40), runnerName: 'aws-2-b' }, // running a job
+      { id: 'i-young', label: 'aws', launchTime: ago(2), runnerName: 'aws-3-c' }, // still booting
+      { id: 'i-legacy', label: 'aws', launchTime: ago(20), jobId: '4' }, // launched before the runner-name tag
+    ];
+    const runners = [runner(11, 'aws-1-a'), runner(12, 'aws-2-b', { busy: true }), runner(14, 'aws-4-x'), runner(99, 'aws-gone-z', { status: 'offline' })];
+    // Nothing queued: both old idle machines go (with their registrations); the busy and the young one stay.
+    expect(fn.surplusRunners({ queued: {}, instances, runners }, c, now)).toEqual({
+      terminate: [{ instanceId: 'i-old', runnerId: 11 }, { instanceId: 'i-legacy', runnerId: 14 }], orphans: [99],
+    });
+    // Two jobs queued: the three free machines can serve them, so only one is surplus (the oldest).
+    expect(fn.surplusRunners({ queued: { aws: 2 }, instances, runners }, c, now).terminate).toEqual([{ instanceId: 'i-old', runnerId: 11 }]);
+    // A machine that never registered (boot failed) is surplus too, without a registration to remove.
+    expect(fn.surplusRunners({ queued: {}, instances: [{ id: 'i-x', label: 'aws', launchTime: ago(10), runnerName: 'aws-9-q' }], runners: [] }, c, now))
+      .toEqual({ terminate: [{ instanceId: 'i-x', runnerId: null }], orphans: [] });
+    // Grace period configurable.
+    expect(fn.surplusRunners({ queued: {}, instances: [{ id: 'i-x', label: 'aws', launchTime: ago(10) }], runners: [] }, { ...c, idleGraceMinutes: 15 }, now).terminate).toEqual([]);
+  });
+
   it('user data runs one job and shuts down, with the timeout guard; rejects a malformed JIT config', () => {
     const script = Buffer.from(fn.userData('QUJD+/=', fn.config({ MAX_JOB_MINUTES: '45' })), 'base64').toString();
     expect(script).toContain('shutdown -h +45');

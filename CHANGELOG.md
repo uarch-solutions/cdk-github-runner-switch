@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0
+
+- Machines left without a job are terminated by the reconciliation after `idleGrace` (5 min): a JIT runner is not tied
+  to the job that launched it, so when that job is cancelled, or another idle runner takes it first, the machine used to
+  wait until `maxJobDuration`. The runner registration is removed first (GitHub refuses it while a job runs), and
+  offline registrations with no machine behind them are cleaned up.
+- The function may terminate only the instances it launched (`ec2:TerminateInstances` with a `runner-switch` tag condition).
+- Instances carry a `runner-name` tag.
+
 ## 0.2.1
 
 - Fix: with an imported `secret`, the function reads it by name, so the generated permission applies (it was denied with a partial ARN).
