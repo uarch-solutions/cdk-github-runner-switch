@@ -91,7 +91,8 @@ describe('GitHubRunnerSwitch', () => {
     const tpl = Template.fromStack(stack);
     tpl.resourceCountIs('AWS::SecretsManager::Secret', 0);
     const fn = Object.values(tpl.findResources('AWS::Lambda::Function'))[0] as any;
-    expect(JSON.stringify(fn.Properties.Environment.Variables.SECRET_ID)).toContain('secret:ci/github-app');
+    // By name, so the generated grant (full ARN with the random suffix) applies.
+    expect(fn.Properties.Environment.Variables.SECRET_ID).toBe('ci/github-app');
   });
 
   it('rejects a repository that is not owner/name', () => {

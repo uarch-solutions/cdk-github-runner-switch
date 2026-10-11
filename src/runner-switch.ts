@@ -180,7 +180,8 @@ export class GitHubRunnerSwitch extends Construct {
       logGroup: new logs.LogGroup(this, 'ControlLogs', { retention: logs.RetentionDays.ONE_MONTH, removalPolicy: RemovalPolicy.DESTROY }),
       description: `GitHub runner switch for ${props.repository}: webhook, reconciliation and minutes check`,
       environment: {
-        SECRET_ID: secret.secretArn,
+        // An imported secret is read by name: its grant covers the full ARN (with the random suffix), not a partial ARN.
+        SECRET_ID: props.secret ? props.secret.secretName : secret.secretArn,
         REPOSITORY: props.repository,
         BILLING: props.billing ?? BillingScope.ORGANIZATION,
         LABEL: label,

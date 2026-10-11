@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- Fix: with an imported `secret`, the function reads it by name, so the generated permission applies (it was denied with a partial ARN).
+
 ## 0.2.0
 
 - `secret` option: reuse an existing Secrets Manager secret with the GitHub App credentials (e.g. when migrating an existing setup).
